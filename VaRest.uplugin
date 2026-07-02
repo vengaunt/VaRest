@@ -1,6 +1,6 @@
 {
     "FileVersion": 3,
-    "Version": 32,
+    "Version": 33,
     "VersionName": "1.0",
     "FriendlyName": "VaRest",
     "Description": "Plugin that makes REST (JSON) server communication easy to use",
@@ -10,7 +10,7 @@
     "DocsURL": "https://bit.ly/VaRest-Docs",
     "FabURL": "com.epicgames.launcher://ue/Fab/product/b69fa88e-9ad7-462b-b0be-105997ddd9c8",
     "SupportURL": "",
-    "EngineVersion": "5.7.0",
+    "EngineVersion": "5.8.0",
     "CanContainContent": false,
     "Installed": true,
     "Modules": [
@@ -22,7 +22,6 @@
                 "Win64",
                 "Linux",
                 "Mac",
-                "Oculus",
                 "iOS",
                 "Android"
             ]
@@ -35,7 +34,6 @@
                 "Win64",
                 "Linux",
                 "Mac",
-                "Oculus",
                 "iOS",
                 "Android"
             ]
