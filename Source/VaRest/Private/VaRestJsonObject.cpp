@@ -133,7 +133,10 @@ FString UVaRestJsonObject::GetFieldTypeString(const FString& FieldName) const
 TArray<FString> UVaRestJsonObject::GetFieldNames() const
 {
 	TArray<FString> Result;
-	JsonObj->Values.GetKeys(Result);
+	for (const auto& Pair : JsonObj->Values)
+	{
+		Result.Add((FString)Pair.Key);
+	}
 
 	return Result;
 }
