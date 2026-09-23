@@ -7,6 +7,7 @@
 #include "VaRestJsonValue.h"
 #include "VaRestLibrary.h"
 #include "VaRestSettings.h"
+#include "VaRestSubsystem.h"
 
 #include "Engine/Engine.h"
 #include "Engine/LatentActionManager.h"
@@ -27,11 +28,22 @@ void FVaRestLatentAction<T>::Cancel()
 	}
 }
 
+template <class T>
+FVaRestLatentAction<T>::~FVaRestLatentAction()
+{
+	// The request keeps a raw pointer and can outlive this action (it is rooted while the HTTP call is in flight).
+	if (UVaRestRequestJSON* RequestObj = Cast<UVaRestRequestJSON>(Request.Get()))
+	{
+		RequestObj->ClearLatentAction(this);
+	}
+}
+
 UVaRestRequestJSON::UVaRestRequestJSON(const class FObjectInitializer& PCIP)
 	: Super(PCIP)
 	, BinaryContentType(TEXT("application/octet-stream"))
 {
 	ContinueAction = nullptr;
+	bShutdownAbort = false;
 
 	RequestVerb = EVaRestRequestVerb::GET;
 	RequestContentType = EVaRestRequestContentType::x_www_form_urlencoded_url;
@@ -139,6 +151,110 @@ void UVaRestRequestJSON::Cancel()
 	ContinueAction = nullptr;
 
 	ResetResponseData();
+}
+
+void UVaRestRequestJSON::BeginDestroy()
+{
+	if (!bShutdownAbort)
+	{
+		bShutdownAbort = true;
+		UnbindWorldTearDown();
+		ContinueAction = nullptr;
+
+		if (HttpRequest->GetStatus() == EHttpRequestStatus::Processing)
+		{
+			HttpRequest->OnProcessRequestComplete().Unbind();
+			HttpRequest->CancelRequest();
+		}
+	}
+
+	Super::BeginDestroy();
+}
+
+void UVaRestRequestJSON::ClearLatentAction(FVaRestLatentAction<UVaRestJsonObject*>* Action)
+{
+	if (ContinueAction == Action)
+	{
+		ContinueAction = nullptr;
+	}
+}
+
+void UVaRestRequestJSON::BindWorldTearDown(UWorld* WorldOverride)
+{
+	UnbindWorldTearDown();
+
+	UWorld* World = WorldOverride;
+	if (World == nullptr)
+	{
+		World = GetWorld();
+	}
+	if (World == nullptr && GEngine != nullptr)
+	{
+		World = GEngine->GetCurrentPlayWorld(nullptr);
+	}
+	if (World == nullptr)
+	{
+		World = GWorld;
+	}
+
+	RequestWorld = World;
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	WorldTearDownHandle = FWorldDelegates::OnWorldBeginTearDown.AddUObject(this, &UVaRestRequestJSON::HandleWorldBeginTearDown);
+}
+
+void UVaRestRequestJSON::UnbindWorldTearDown()
+{
+	if (WorldTearDownHandle.IsValid())
+	{
+		FWorldDelegates::OnWorldBeginTearDown.Remove(WorldTearDownHandle);
+		WorldTearDownHandle.Reset();
+	}
+}
+
+void UVaRestRequestJSON::HandleWorldBeginTearDown(UWorld* World)
+{
+	if (World != nullptr && World == RequestWorld.Get())
+	{
+		AbortForShutdown();
+	}
+}
+
+void UVaRestRequestJSON::DropSubsystemCall()
+{
+	if (UVaRestSubsystem* Subsystem = Cast<UVaRestSubsystem>(GetOuter()))
+	{
+		Subsystem->AbandonCall(this);
+	}
+}
+
+void UVaRestRequestJSON::AbortForShutdown()
+{
+	if (bShutdownAbort)
+	{
+		return;
+	}
+
+	bShutdownAbort = true;
+	UnbindWorldTearDown();
+	ContinueAction = nullptr;
+
+	const bool bProcessing = HttpRequest->GetStatus() == EHttpRequestStatus::Processing;
+	HttpRequest->OnProcessRequestComplete().Unbind();
+	if (bProcessing)
+	{
+		HttpRequest->CancelRequest();
+	}
+
+	DropSubsystemCall();
+
+	if (bProcessing)
+	{
+		RemoveFromRoot();
+	}
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -283,6 +399,8 @@ void UVaRestRequestJSON::ApplyURL(const FString& Url, UVaRestJsonObject*& Result
 		}
 
 		LatentActionManager.AddNewAction(LatentInfo.CallbackTarget, LatentInfo.UUID, ContinueAction = new FVaRestLatentAction<UVaRestJsonObject*>(this, Result, LatentInfo));
+		ProcessRequest(World);
+		return;
 	}
 
 	ProcessRequest();
@@ -299,10 +417,13 @@ void UVaRestRequestJSON::ExecuteProcessRequest()
 	ProcessRequest();
 }
 
-void UVaRestRequestJSON::ProcessRequest()
+void UVaRestRequestJSON::ProcessRequest(UWorld* WorldOverride)
 {
+	bShutdownAbort = false;
+
 	// Force add to root once request is launched
 	AddToRoot();
+	BindWorldTearDown(WorldOverride);
 
 	// Set verb
 	switch (RequestVerb)
@@ -483,6 +604,24 @@ void UVaRestRequestJSON::ProcessRequest()
 
 void UVaRestRequestJSON::OnProcessRequestComplete(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
+	if (bShutdownAbort)
+	{
+		ContinueAction = nullptr;
+		return;
+	}
+
+	UnbindWorldTearDown();
+
+	UWorld* World = RequestWorld.Get();
+	if (World != nullptr && World->bIsTearingDown)
+	{
+		bShutdownAbort = true;
+		ContinueAction = nullptr;
+		DropSubsystemCall();
+		RemoveFromRoot();
+		return;
+	}
+
 	// Remove from root on completion
 	RemoveFromRoot();
 
@@ -572,13 +711,17 @@ void UVaRestRequestJSON::OnProcessRequestComplete(FHttpRequestPtr Request, FHttp
 	OnRequestComplete.Broadcast(this);
 	OnStaticRequestComplete.Broadcast(this);
 
-	// Finish the latent action
-	if (ContinueAction)
+	// Finish the latent action. Skip it if PIE already destroyed the callback target.
+	if (ContinueAction && ContinueAction->CallbackTarget.IsValid())
 	{
 		FVaRestLatentAction<UVaRestJsonObject*>* K = ContinueAction;
 		ContinueAction = nullptr;
 
 		K->Call(ResponseJsonObj);
+	}
+	else
+	{
+		ContinueAction = nullptr;
 	}
 }
 

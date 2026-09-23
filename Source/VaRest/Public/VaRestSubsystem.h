@@ -56,6 +56,12 @@ public:
 	/** Called when URL is processed (one for both success/unsuccess events)*/
 	void OnCallComplete(UVaRestRequestJSON* Request);
 
+private:
+	friend class UVaRestRequestJSON;
+
+	/** Drop a CallURL entry without running the user callback. */
+	void AbandonCall(UVaRestRequestJSON* Request);
+
 protected:
 	UPROPERTY()
 	TMap<UVaRestRequestJSON*, FVaRestCallResponse> RequestMap;
