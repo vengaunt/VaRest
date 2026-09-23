@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "Delegates/Delegate.h"
 #include "Engine/LatentActionManager.h"
 #include "Http.h"
 #include "HttpModule.h"
@@ -12,6 +13,7 @@
 
 #include "VaRestRequestJSON.generated.h"
 
+class UWorld;
 class UVaRestJsonValue;
 class UVaRestJsonObject;
 class UVaRestSettings;
@@ -60,6 +62,8 @@ public:
 	{
 		Cancel();
 	}
+
+	virtual ~FVaRestLatentAction() override;
 
 private:
 	bool Called;
@@ -138,6 +142,8 @@ public:
 	/** Cancel latent response waiting  */
 	UFUNCTION(BlueprintCallable, Category = "VaRest|Response")
 	void Cancel();
+
+	virtual void BeginDestroy() override;
 
 	//////////////////////////////////////////////////////////////////////////
 	// JSON data accessors
@@ -228,7 +234,7 @@ public:
 
 protected:
 	/** Apply current internal setup to request and process it */
-	void ProcessRequest();
+	void ProcessRequest(UWorld* WorldOverride = nullptr);
 
 	//////////////////////////////////////////////////////////////////////////
 	// Request callbacks
@@ -355,4 +361,17 @@ protected:
 public:
 	/** Returns reference to internal request object */
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> GetHttpRequest() const { return HttpRequest; };
+
+	void ClearLatentAction(FVaRestLatentAction<UVaRestJsonObject*>* Action);
+
+private:
+	void BindWorldTearDown(UWorld* WorldOverride);
+	void UnbindWorldTearDown();
+	void HandleWorldBeginTearDown(UWorld* World);
+	void DropSubsystemCall();
+	void AbortForShutdown();
+
+	FDelegateHandle WorldTearDownHandle;
+	TWeakObjectPtr<UWorld> RequestWorld;
+	bool bShutdownAbort = false;
 };

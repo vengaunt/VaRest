@@ -73,6 +73,23 @@ void UVaRestSubsystem::OnCallComplete(UVaRestRequestJSON* Request)
 	RequestMap.Remove(Request);
 }
 
+void UVaRestSubsystem::AbandonCall(UVaRestRequestJSON* Request)
+{
+	FVaRestCallResponse* Response = RequestMap.Find(Request);
+	if (Response == nullptr)
+	{
+		return;
+	}
+
+	if (Request != nullptr)
+	{
+		Request->OnStaticRequestComplete.Remove(Response->CompleteDelegateHandle);
+		Request->OnStaticRequestFail.Remove(Response->FailDelegateHandle);
+	}
+
+	RequestMap.Remove(Request);
+}
+
 UVaRestRequestJSON* UVaRestSubsystem::ConstructVaRestRequest()
 {
 	return NewObject<UVaRestRequestJSON>(this);
